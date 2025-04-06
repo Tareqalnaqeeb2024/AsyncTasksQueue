@@ -1,0 +1,6 @@
+@AsyncTasksQueue_HostAddress = http://localhost:5211
+
+GET {{AsyncTasksQueue_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

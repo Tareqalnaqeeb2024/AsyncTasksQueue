@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("AsyncTasksQueue")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+f3180992a799e84a39ad35030cc808e4e1e01aa0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+ee5dfcfca04005474d4cfc1f072cc8da52ef1724")]
 [assembly: System.Reflection.AssemblyProductAttribute("AsyncTasksQueue")]
 [assembly: System.Reflection.AssemblyTitleAttribute("AsyncTasksQueue")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

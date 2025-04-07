@@ -166,3 +166,6 @@ E:\CompanyTasks\AsyncTasksQueue\AsyncTasksQueue\obj\Debug\net8.0\refint\AsyncTas
 E:\CompanyTasks\AsyncTasksQueue\AsyncTasksQueue\obj\Debug\net8.0\AsyncTasksQueue.pdb
 E:\CompanyTasks\AsyncTasksQueue\AsyncTasksQueue\obj\Debug\net8.0\AsyncTasksQueue.genruntimeconfig.cache
 E:\CompanyTasks\AsyncTasksQueue\AsyncTasksQueue\obj\Debug\net8.0\ref\AsyncTasksQueue.dll
+E:\CompanyTasks\AsyncTasksQueue\AsyncTasksQueue\obj\Debug\net8.0\AsyncTasksQueue.sourcelink.json
+E:\CompanyTasks\AsyncTasksQueue\AsyncTasksQueue\bin\Debug\net8.0\Polly.dll
+E:\CompanyTasks\AsyncTasksQueue\AsyncTasksQueue\bin\Debug\net8.0\Polly.Core.dll

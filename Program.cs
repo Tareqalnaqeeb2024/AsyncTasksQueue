@@ -1,4 +1,6 @@
 using AsyncTasksQueue.Data;
+using AsyncTasksQueue.Repositories;
+using AsyncTasksQueue.Services;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -15,15 +17,33 @@ builder.Services.AddDbContextFactory<ApplicationDBContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("ConnectionString")),
     ServiceLifetime.Scoped);
 
-var app = builder.Build();
+// Register repositories
+builder.Services.AddScoped<IJobRepository, JobRepository>();
+// Register services
+builder.Services.AddScoped<IJobService, JobService>();
+
+builder.Services.AddHttpClient();
 
 // Configure the HTTP request pipeline.
+
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowAll", policy =>
+    {
+        policy.AllowAnyOrigin()
+              .AllowAnyMethod()
+              .AllowAnyHeader();
+    });
+});
+
+var app = builder.Build();
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
 }
 
+app.UseCors("AllowAll");
 app.UseHttpsRedirection();
 
 app.UseAuthorization();

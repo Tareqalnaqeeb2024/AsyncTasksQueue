@@ -10,6 +10,6 @@ namespace AsyncTasksQueue.Data
         {
 
         }
-        DbSet<Job> Jobs {  get; set; }
+       public  DbSet<Job> Jobs {  get; set; }
     }
 }

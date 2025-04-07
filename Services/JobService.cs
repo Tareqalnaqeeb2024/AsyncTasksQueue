@@ -1,28 +1,36 @@
 ﻿using AsyncTasksQueue.Data;
 using AsyncTasksQueue.Models;
 using AsyncTasksQueue.Repositories;
+using Polly;
+using Polly.RateLimit;
+using System.Net.Http;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace AsyncTasksQueue.Services
 {
     public class JobService : IJobService
     {
+        private readonly AsyncRateLimitPolicy _rateLimitPolicy;
+    
+        private readonly SemaphoreSlim _throttler = new SemaphoreSlim(10, 10); 
+        private readonly object _lock = new object();
         private readonly IJobRepository _jobRepository;
         private readonly ApplicationDBContext _context;
-        private readonly int _maxConcurrentJobs;
-        private readonly SemaphoreSlim _semaphore;
         private readonly PriorityQueue<Job, JobPriority> _priorityQueue;
-        private readonly object _queueLock = new object();
-        private readonly int _maxJobsPerWindow = 10;                // عدد المهام المسموح بها في النافذة
-        private readonly TimeSpan _windowDuration = TimeSpan.FromMinutes(1); // مدة النافذة الزمنية
+       
 
-
-        public JobService(IJobRepository jobRepository, ApplicationDBContext context, int maxConCurrentJobs = 3)
+        public JobService(IJobRepository jobRepository, ApplicationDBContext context)
         {
             _jobRepository = jobRepository;
             _context = context;
-            _maxConcurrentJobs = maxConCurrentJobs;
-            _semaphore = new SemaphoreSlim(maxConCurrentJobs);
             _priorityQueue = new PriorityQueue<Job, JobPriority>();
+
+            _rateLimitPolicy = Policy.RateLimitAsync(
+           numberOfExecutions: 10,
+           perTimeSpan: TimeSpan.FromMinutes(1),
+           maxBurst: 1);
         }
 
         public async Task EnqueueJob(string taskName, string data, JobPriority priority = JobPriority.Medium, int maxRetries = 3)
@@ -86,83 +94,91 @@ namespace AsyncTasksQueue.Services
             await ProcessJobsFromQueue();
         }
 
-        //private async Task ProcessJobsFromQueue()
-        //{
-        //    var processingTasks = new List<Task>();
-        //    var delayBetweenJobs = TimeSpan.FromSeconds(6);
+       
+        public async Task ProcessJobsFromQueue()
+        {
+            while (true)
+            {
+                Job nextJob;
+                if (!_priorityQueue.TryDequeue(out nextJob, out _))
+                    break;
 
-        //    while (true)
-        //    {
-        //        Job nextJob;
+                await _throttler.WaitAsync();
 
+                try
+                {
+                    //if (_rateLimitPolicy == null)
+                    //{
+                    //    throw new InvalidOperationException("RateLimitPolicy is not initialized.");
+                    //}
+                    // تطبيق Rate Limiting
+                    await _rateLimitPolicy.ExecuteAsync(async () =>
+                    {
+                        await ProcessSingleJobAsync(nextJob);
+                    });
+                }
+                catch (RateLimitRejectedException ex)
+                {
 
-        //            if (!_priorityQueue.TryDequeue(out nextJob, out _))
-        //                break;
-
-
-        //        processingTasks.Add(ProcessSingleJobAsync(nextJob));
-
-
-        //        if (processingTasks.Count >= _maxConcurrentJobs)
-        //        {
-        //            await Task.Delay(delayBetweenJobs);
-        //            await Task.WhenAny(processingTasks);
-        //            processingTasks.RemoveAll(t => t.IsCompleted);
-        //        }
-        //    }
-        //    await Task.WhenAll(processingTasks);
-        //}
-
-
-        //private async Task ProcessJobsFromQueue()
-        //{
-        //    var processingTasks = new List<Task>();
-        //    var delayBetweenJobs = TimeSpan.FromSeconds(6);
-
-        //    int tasksProcessedThisMinute = 0;
-        //    DateTime minuteWindowStart = DateTime.UtcNow;
-
-        //    while (true)
-        //    {
-        //        Job nextJob;
-
-        //        if (!_priorityQueue.TryDequeue(out nextJob, out _))
-        //            break;
-
-        //        // تحقق من عدد المهام التي تمت خلال الدقيقة الحالية
-        //        if (tasksProcessedThisMinute >= 10)
-        //        {
-        //            var timeSinceWindowStart = DateTime.UtcNow - minuteWindowStart;
-
-        //            if (timeSinceWindowStart < TimeSpan.FromMinutes(1))
-        //            {
-        //                var delay = TimeSpan.FromMinutes(1) - timeSinceWindowStart;
-
-        //                await Task.Delay(delay);
-        //            }
-
-        //            // إعادة ضبط العداد بعد مرور دقيقة
-        //            tasksProcessedThisMinute = 0;
-        //            minuteWindowStart = DateTime.UtcNow;
-        //        }
-
-        //        processingTasks.Add(ProcessSingleJobAsync(nextJob));
-        //        tasksProcessedThisMinute++;
+                    _priorityQueue.Enqueue(nextJob, nextJob.Priority);
 
 
-        //            await Task.Delay(delayBetweenJobs);
-        //            await Task.WhenAny(processingTasks);
-        //            processingTasks.RemoveAll(t => t.IsCompleted);
+                }
+                catch (Exception ex)
+                {
+                   
+                    Console.WriteLine($"Error processing job: {ex.Message}");
+                }
+                finally
+                {
+                    _throttler.Release();
+                }
+            }
+        }
+       
+        private async Task ProcessSingleJobAsync(Job job)
+       {
+            
+                job.Status = JobStatus.InProgress;
+             
+                bool isSuccess = new Random().Next(0, 2) == 0;
 
-        //    }
+                if (isSuccess)
+                {
+                    job.Status = JobStatus.Completed;
+                    await _jobRepository.Update(job);
+                    await SendJobStatusToExternalApi(job);
 
-        //    await Task.WhenAll(processingTasks);
-        //}
+                    return;
+                }
+                else
+                {
+                    if (job.RetryCount >= job.MaxRetries)
+                    {
+                        job.Status = JobStatus.DeadLetter;
+                        await _jobRepository.Update(job);
+                        await SendJobStatusToExternalApi(job);
+
+                        return;
+                    }
+                }
+
+                 job.Status = JobStatus.Failed;
+                await SendJobStatusToExternalApi(job);
+                job.RetryCount++;
+                int delay = (int)Math.Pow(2, job.RetryCount);
+                job.NextRetryTime = DateTime.UtcNow.AddSeconds(delay);
+                _priorityQueue.Enqueue(job, job.Priority);
+                await _jobRepository.Update(job);
+                ;
+
+    
+        }
 
         public async Task ProcessFailedsJobs()
         {
 
-            var FailedsJobs = await _jobRepository.GetPendingJobs();
+            var FailedsJobs = await _jobRepository.GetFailedsJobs();
 
 
             foreach (var job in FailedsJobs)
@@ -173,102 +189,44 @@ namespace AsyncTasksQueue.Services
 
             await ProcessJobsFromQueue();
         }
-
-
-        private async Task ProcessJobsFromQueue()
+        
+        private async Task SendJobStatusToExternalApi(Job job)
         {
-            var processingTasks = new List<Task>();
-
-            int tasksProcessedInWindow = 0;
-            DateTime windowStart = DateTime.UtcNow;
-
-            while (true)
-            {
-                if (!_priorityQueue.TryDequeue(out Job nextJob, out _))
-                    break;
-
-                var timeSinceWindowStart = DateTime.UtcNow - windowStart;
-
-                if (tasksProcessedInWindow >= _maxJobsPerWindow)
-                {
-                    var remainingTime = _windowDuration - timeSinceWindowStart;
-
-                    if (remainingTime > TimeSpan.Zero)
-                    {
-                        await Task.Delay(remainingTime);
-                    }
-
-                    // إعادة ضبط العداد وبداية نافذة جديدة
-                    tasksProcessedInWindow = 0;
-                    windowStart = DateTime.UtcNow;
-                }
-
-                // بدء المعالجة
-                var task = ProcessSingleJobAsync(nextJob);
-                processingTasks.Add(task);
-                tasksProcessedInWindow++;
-
-                // التحكم في التزامن
-                if (processingTasks.Count >= _maxConcurrentJobs)
-                {
-                    var completed = await Task.WhenAny(processingTasks);
-                    processingTasks.Remove(completed);
-                }
-            }
-
-            await Task.WhenAll(processingTasks);
-        }
-
-        private async Task ProcessSingleJobAsync(Job job)
-        {
-            await _semaphore.WaitAsync();
             try
             {
-                job.Status = JobStatus.InProgress;
-                await _jobRepository.Update(job);
-
-                await Task.Delay(1000);
-
-                bool isSuccess = new Random().Next(0, 2) == 0;
-
-                if (isSuccess)
+               
+                var requestData = new
                 {
-                    job.Status = JobStatus.Completed;
-                    await _jobRepository.Update(job);
-                    return;
+                    jobId = job.Id,
+                    status = job.Status.ToString()
+                };
+
+                using (var httpClient = new HttpClient())
+                {
+                    
+                    var json = JsonSerializer.Serialize(requestData);
+                    Console.WriteLine(json);
+                    var content = new StringContent(json, Encoding.UTF8, "application/json");
+                    var response = await httpClient.PostAsync("https://localhost:7192/api/SaveStatusResult", content);
+
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        var responseBody = await response.Content.ReadAsStringAsync();
+                        Console.WriteLine($"API Error Response:");
+                        throw new HttpRequestException($"API Error: {response.StatusCode} - {responseBody}");
+                    }
+
+                    Console.WriteLine("Status successfully updated!");
                 }
-
-                job.Status = JobStatus.Failed;
-                await _jobRepository.Update(job);
-                //await HandleFailedJobAsync(job);
             }
-            finally
+            catch (Exception ex)
             {
-                _semaphore.Release();
+                Console.WriteLine($"Failed to update job status: {ex.Message}");
+                throw; 
             }
         }
 
-        private async Task RetryFailedJobAsync(Job job)
-        {
-            //job.Status = JobStatus.Failed;
-            job.RetryCount++;
-
-            if (job.RetryCount >= job.MaxRetries)
-            {
-                job.Status = JobStatus.DeadLetter;
-                await _jobRepository.Update(job);
-                return;
-            }
-
-
-            int delay = (int)Math.Pow(2, job.RetryCount);
-            job.NextRetryTime = DateTime.UtcNow.AddSeconds(delay);
-            await _jobRepository.Update(job);
-
-            _priorityQueue.Enqueue(job, job.Priority);
-
-        }
-
+       
 
 
     }

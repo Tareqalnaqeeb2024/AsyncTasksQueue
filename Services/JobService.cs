@@ -13,9 +13,7 @@ namespace AsyncTasksQueue.Services
     public class JobService : IJobService
     {
         private readonly AsyncRateLimitPolicy _rateLimitPolicy;
-    
-        private readonly SemaphoreSlim _throttler = new SemaphoreSlim(10, 10); 
-        private readonly object _lock = new object();
+        private readonly SemaphoreSlim _throttler = new SemaphoreSlim(10); 
         private readonly IJobRepository _jobRepository;
         private readonly ApplicationDBContext _context;
         private readonly PriorityQueue<Job, JobPriority> _priorityQueue;
@@ -28,7 +26,7 @@ namespace AsyncTasksQueue.Services
             _priorityQueue = new PriorityQueue<Job, JobPriority>();
 
             _rateLimitPolicy = Policy.RateLimitAsync(
-           numberOfExecutions: 10,
+           numberOfExecutions: 3,
            perTimeSpan: TimeSpan.FromMinutes(1),
            maxBurst: 1);
         }
@@ -103,7 +101,7 @@ namespace AsyncTasksQueue.Services
                 if (!_priorityQueue.TryDequeue(out nextJob, out _))
                     break;
 
-                await _throttler.WaitAsync();
+                //await _throttler.WaitAsync();
 
                 try
                 {
@@ -111,7 +109,7 @@ namespace AsyncTasksQueue.Services
                     //{
                     //    throw new InvalidOperationException("RateLimitPolicy is not initialized.");
                     //}
-                    // تطبيق Rate Limiting
+                  
                     await _rateLimitPolicy.ExecuteAsync(async () =>
                     {
                         await ProcessSingleJobAsync(nextJob);
@@ -120,7 +118,10 @@ namespace AsyncTasksQueue.Services
                 catch (RateLimitRejectedException ex)
                 {
 
+                    
+
                     _priorityQueue.Enqueue(nextJob, nextJob.Priority);
+                    await Task.Delay(ex.RetryAfter);
 
 
                 }
@@ -129,10 +130,10 @@ namespace AsyncTasksQueue.Services
                    
                     Console.WriteLine($"Error processing job: {ex.Message}");
                 }
-                finally
-                {
-                    _throttler.Release();
-                }
+                //finally
+                //{
+                //    _throttler.Release();
+                //}
             }
         }
        

@@ -57,7 +57,7 @@ namespace AsyncTasksQueue.Repositories
             var now = DateTime.UtcNow;
 
             return await context.Jobs
-                .Where(P => P.Status == JobStatus.Pending || P.Status == JobStatus.InProgress )
+                .Where(P => P.Status == JobStatus.Pending  )
                 .OrderBy(P => P.Priority)
                 .ThenBy(P => P.CreatedAt)
                 .AsNoTracking()

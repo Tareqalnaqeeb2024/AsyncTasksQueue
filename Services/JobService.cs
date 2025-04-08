@@ -13,7 +13,6 @@ namespace AsyncTasksQueue.Services
     public class JobService : IJobService
     {
         private readonly AsyncRateLimitPolicy _rateLimitPolicy;
-        private readonly SemaphoreSlim _throttler = new SemaphoreSlim(10); 
         private readonly IJobRepository _jobRepository;
         private readonly ApplicationDBContext _context;
         private readonly PriorityQueue<Job, JobPriority> _priorityQueue;
@@ -26,7 +25,7 @@ namespace AsyncTasksQueue.Services
             _priorityQueue = new PriorityQueue<Job, JobPriority>();
 
             _rateLimitPolicy = Policy.RateLimitAsync(
-           numberOfExecutions: 3,
+           numberOfExecutions: 10,
            perTimeSpan: TimeSpan.FromMinutes(1),
            maxBurst: 1);
         }
@@ -101,14 +100,11 @@ namespace AsyncTasksQueue.Services
                 if (!_priorityQueue.TryDequeue(out nextJob, out _))
                     break;
 
-                //await _throttler.WaitAsync();
+               
 
                 try
                 {
-                    //if (_rateLimitPolicy == null)
-                    //{
-                    //    throw new InvalidOperationException("RateLimitPolicy is not initialized.");
-                    //}
+                    
                   
                     await _rateLimitPolicy.ExecuteAsync(async () =>
                     {
@@ -130,10 +126,7 @@ namespace AsyncTasksQueue.Services
                    
                     Console.WriteLine($"Error processing job: {ex.Message}");
                 }
-                //finally
-                //{
-                //    _throttler.Release();
-                //}
+              
             }
         }
        
@@ -169,9 +162,9 @@ namespace AsyncTasksQueue.Services
                 job.RetryCount++;
                 int delay = (int)Math.Pow(2, job.RetryCount);
                 job.NextRetryTime = DateTime.UtcNow.AddSeconds(delay);
-                _priorityQueue.Enqueue(job, job.Priority);
+                //_priorityQueue.Enqueue(job, job.Priority);
                 await _jobRepository.Update(job);
-                ;
+                
 
     
         }

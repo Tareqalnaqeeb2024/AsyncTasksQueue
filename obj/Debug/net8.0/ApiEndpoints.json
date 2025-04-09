@@ -101,6 +101,22 @@
   },
   {
     "ContainingType": "AsyncTasksQueue.Controllers.JobController",
+    "Method": "ProcessSingleFailedJobs",
+    "RelativePath": "api/Job/processSingleFailedJob",
+    "HttpMethod": "PUT",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Int32",
+        "IsRequired": false
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "AsyncTasksQueue.Controllers.JobController",
     "Method": "RetryProcessFailedJobs",
     "RelativePath": "api/Job/RetryProcessFailedJob",
     "HttpMethod": "PUT",

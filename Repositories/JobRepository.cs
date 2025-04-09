@@ -51,6 +51,19 @@ namespace AsyncTasksQueue.Repositories
                 .ToListAsync();
         }
 
+        public async Task<Job?> GetFaliedJob0ById(int id)
+        {
+            await using var context = await _contextFactory.CreateDbContextAsync();
+            var now = DateTime.UtcNow;
+
+            return await context.Jobs
+                .Where(j => j.Id == id
+                    && j.Status == JobStatus.Failed
+                    && j.RetryCount <= j.MaxRetries
+                    && j.NextRetryTime <= now)
+                .FirstOrDefaultAsync();
+        }
+
         public async Task<IEnumerable<Job>> GetPendingJobs()
         {
             await using var context = await _contextFactory.CreateDbContextAsync();

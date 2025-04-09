@@ -6,11 +6,12 @@ namespace AsyncTasksQueue.Services
     {
 
         Task EnqueueJob(string taskName, string data, JobPriority priority = JobPriority.Medium, int maxRetries = 3);
-        Task ProcessJobs();
+        Task ProcessPendingJobs();
         Task ProcessFailedsJobs();
         Task<JobStats> GetJobStats();
         Task<IEnumerable<Job>> GetAllJobs();
         Task<Job> GetJobById(int id);
+        Task ProcessSingleJobAsync(int id);
     }
     public class JobStats
     {

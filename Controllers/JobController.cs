@@ -50,8 +50,16 @@ namespace AsyncTasksQueue.Controllers
         public async Task<ActionResult> ProcessJobs()
         {
 
-            await _jobService.ProcessJobs();
-            return Ok("Job processing started .");
+            await _jobService.ProcessPendingJobs();
+            return Ok("Processed Jobs  .");
+        }
+
+        [HttpPut("processSingleFailedJob")]
+        public async Task<ActionResult> ProcessSingleFailedJobs(int id)
+        {
+
+            await _jobService.ProcessSingleJobAsync(id);
+            return Ok(" Processed Single Failed Job.");
         }
 
         [HttpPut("RetryProcessFailedJob")]
@@ -59,7 +67,7 @@ namespace AsyncTasksQueue.Controllers
         {
 
             await _jobService.ProcessFailedsJobs();
-            return Ok("Job processing started .");
+            return Ok("Processed Faileds Job .");
         }
 
 

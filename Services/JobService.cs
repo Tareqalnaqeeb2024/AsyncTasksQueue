@@ -16,7 +16,8 @@ namespace AsyncTasksQueue.Services
         private readonly IJobRepository _jobRepository;
         private readonly ApplicationDBContext _context;
         private readonly PriorityQueue<Job, JobPriority> _priorityQueue;
-       
+        
+
 
         public JobService(IJobRepository jobRepository, ApplicationDBContext context)
         {
@@ -25,9 +26,10 @@ namespace AsyncTasksQueue.Services
             _priorityQueue = new PriorityQueue<Job, JobPriority>();
 
             _rateLimitPolicy = Policy.RateLimitAsync(
-           numberOfExecutions: 10,
-           perTimeSpan: TimeSpan.FromMinutes(1),
-           maxBurst: 1);
+           numberOfExecutions: 20,
+           perTimeSpan: TimeSpan.FromSeconds(100),
+           maxBurst: 2);
+
         }
 
         public async Task EnqueueJob(string taskName, string data, JobPriority priority = JobPriority.Medium, int maxRetries = 3)
@@ -76,7 +78,7 @@ namespace AsyncTasksQueue.Services
             };
         }
 
-        public async Task ProcessJobs()
+        public async Task ProcessPendingJobs()
         {
 
             var pendingJobs = await _jobRepository.GetPendingJobs();
@@ -88,48 +90,56 @@ namespace AsyncTasksQueue.Services
                 _priorityQueue.Enqueue(job, job.Priority);
             }
 
-            await ProcessJobsFromQueue();
+             await ProcessJobsFromQueue(maxJobsPerInterval: 5, interval: TimeSpan.FromMinutes(2));
+
         }
 
-       
-        public async Task ProcessJobsFromQueue()
+
+        public async Task ProcessJobsFromQueue(int maxJobsPerInterval, TimeSpan interval)
         {
             while (true)
             {
-                Job nextJob;
-                if (!_priorityQueue.TryDequeue(out nextJob, out _))
-                    break;
+                int jobsProcessed = 0;
+                var intervalStart = DateTime.UtcNow;
+
+                while (jobsProcessed < maxJobsPerInterval)
+                {
+                    if (!_priorityQueue.TryDequeue(out var nextJob, out _))
+                        break;
+
+                    try
+                    {
+                        await _rateLimitPolicy.ExecuteAsync(async () =>
+                        {
+                            await ProcessSingleJobAsync(nextJob);
+                            await SendJobStatusToExternalApi(nextJob);
+                        });
+
+                        jobsProcessed++;
+                    }
+                    catch (RateLimitRejectedException ex)
+                    {
+                       
+                        _priorityQueue.Enqueue(nextJob, nextJob.Priority);
+                        await Task.Delay(ex.RetryAfter);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Error processing job: {ex.Message}");
+                    }
+                }
 
                
-
-                try
+                var elapsed = DateTime.UtcNow - intervalStart;
+                var remainingTime = interval - elapsed;
+                if (remainingTime > TimeSpan.Zero)
                 {
-                    
-                  
-                    await _rateLimitPolicy.ExecuteAsync(async () =>
-                    {
-                        await ProcessSingleJobAsync(nextJob);
-                    });
+                    await Task.Delay(remainingTime);
                 }
-                catch (RateLimitRejectedException ex)
-                {
-
-                    
-
-                    _priorityQueue.Enqueue(nextJob, nextJob.Priority);
-                    await Task.Delay(ex.RetryAfter);
-
-
-                }
-                catch (Exception ex)
-                {
-                   
-                    Console.WriteLine($"Error processing job: {ex.Message}");
-                }
-              
             }
         }
-       
+
+
         private async Task ProcessSingleJobAsync(Job job)
        {
             
@@ -141,8 +151,6 @@ namespace AsyncTasksQueue.Services
                 {
                     job.Status = JobStatus.Completed;
                     await _jobRepository.Update(job);
-                    await SendJobStatusToExternalApi(job);
-
                     return;
                 }
                 else
@@ -151,44 +159,35 @@ namespace AsyncTasksQueue.Services
                     {
                         job.Status = JobStatus.DeadLetter;
                         await _jobRepository.Update(job);
-                        await SendJobStatusToExternalApi(job);
-
                         return;
                     }
                 }
 
                  job.Status = JobStatus.Failed;
-                await SendJobStatusToExternalApi(job);
                 job.RetryCount++;
                 int delay = (int)Math.Pow(2, job.RetryCount);
                 job.NextRetryTime = DateTime.UtcNow.AddSeconds(delay);
-                //_priorityQueue.Enqueue(job, job.Priority);
-                await _jobRepository.Update(job);
-                
-
+                await _jobRepository.Update(job);  
     
         }
 
         public async Task ProcessFailedsJobs()
         {
-
             var FailedsJobs = await _jobRepository.GetFailedsJobs();
-
 
             foreach (var job in FailedsJobs)
             {
-
                 _priorityQueue.Enqueue(job, job.Priority);
             }
+            await ProcessJobsFromQueue(maxJobsPerInterval: 5, interval: TimeSpan.FromMinutes(2));
 
-            await ProcessJobsFromQueue();
+
         }
-        
+
         private async Task SendJobStatusToExternalApi(Job job)
         {
             try
             {
-               
                 var requestData = new
                 {
                     jobId = job.Id,
@@ -197,7 +196,6 @@ namespace AsyncTasksQueue.Services
 
                 using (var httpClient = new HttpClient())
                 {
-                    
                     var json = JsonSerializer.Serialize(requestData);
                     Console.WriteLine(json);
                     var content = new StringContent(json, Encoding.UTF8, "application/json");
@@ -209,7 +207,6 @@ namespace AsyncTasksQueue.Services
                         Console.WriteLine($"API Error Response:");
                         throw new HttpRequestException($"API Error: {response.StatusCode} - {responseBody}");
                     }
-
                     Console.WriteLine("Status successfully updated!");
                 }
             }
@@ -220,8 +217,12 @@ namespace AsyncTasksQueue.Services
             }
         }
 
-       
+        public async Task ProcessSingleJobAsync(int id)
+        {
+            var FailedJob = await _jobRepository.GetFaliedJob0ById(id);
 
 
+            await ProcessSingleJobAsync(FailedJob);
+        }
     }
 }
